@@ -8,12 +8,12 @@ with open(os.path.join(this_dir, "README.txt"), encoding="utf-8") as f:
 setuptools.setup(
     name="table_ocr",
     version="0.2.5",
-    author="Eric Ihli",
-    author_email="eihli@owoga.com",
+    author="Hennes Barnehl",
+    author_email="hennesbarnehl@web.de",
     description="Extract text from tables in images.",
     long_description=long_description,
     long_description_content_type="text/plain",
-    url="https://github.com/eihli/image-table-ocr",
+    url="https://github.com/hbarnehl/adapted-image-table-ocr",
     packages=setuptools.find_packages(),
     package_data={
         "table_ocr": ["tessdata/table-ocr.traineddata", "tessdata/eng.traineddata"]
