@@ -2,10 +2,12 @@ import cv2
 import os
 
 def extract_cell_images_from_table(image):
+# First image is blurred to reduce noise
     BLUR_KERNEL_SIZE = (17, 17)
     STD_DEV_X_DIRECTION = 0
     STD_DEV_Y_DIRECTION = 0
     blurred = cv2.GaussianBlur(image, BLUR_KERNEL_SIZE, STD_DEV_X_DIRECTION, STD_DEV_Y_DIRECTION)
+# Then thresholded to facilitate transformations
     MAX_COLOR_VAL = 255
     BLOCK_SIZE = 15
     SUBTRACT_FROM_MEAN = -2
@@ -18,6 +20,7 @@ def extract_cell_images_from_table(image):
         BLOCK_SIZE,
         SUBTRACT_FROM_MEAN,
     )
+# Finding Vertical and Horizontal Lines
     vertical = horizontal = img_bin.copy()
     SCALE = 5
     image_width, image_height = horizontal.shape
@@ -30,6 +33,8 @@ def extract_cell_images_from_table(image):
     vertically_dilated = cv2.dilate(vertically_opened, cv2.getStructuringElement(cv2.MORPH_RECT, (1, 60)))
     
     mask = horizontally_dilated + vertically_dilated
+    
+# Finding Contours of the lines
     contours, heirarchy = cv2.findContours(
         mask, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE,
     )
@@ -44,7 +49,7 @@ def extract_cell_images_from_table(image):
     bounding_rects = [cv2.boundingRect(a) for a in approx_polys]
     
     # Filter out rectangles that are too narrow or too short.
-    MIN_RECT_WIDTH = 40
+    MIN_RECT_WIDTH = 30
     MIN_RECT_HEIGHT = 10
     bounding_rects = [
         r for r in bounding_rects if MIN_RECT_WIDTH < r[2] and MIN_RECT_HEIGHT < r[3]
