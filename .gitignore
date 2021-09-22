@@ -8,3 +8,5 @@ tmp/
 build
 htmlcov
 *.egg-info
+.ipynb_checkpoints
+
