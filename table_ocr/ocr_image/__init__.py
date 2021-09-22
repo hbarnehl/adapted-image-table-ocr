@@ -6,7 +6,7 @@ import cv2
 import numpy as np
 import pytesseract
 
-def main(image_file, tess_args):
+def main(tess_args, image_file):
     """
     OCR the image and output the text to a file with an extension that is ready
     to be used in Tesseract training (.gt.txt).
