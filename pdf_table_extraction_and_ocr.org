@@ -1,0 +1,1296 @@
+# -*- org-image-actual-width: 500; -*-
+
+#+TITLE: PDF Parsing
+#+PROPERTY: header-args :session *Python*
+#+STARTUP: inlineimages
+#+OPTIONS: ^:nil H:4
+
+#+BEGIN_COMMENT
+Some notes about the header for those not familiar with Org Mode:
+
+The property `header-args` with ~:session \*Python\*~ will cause all evaluated
+source code blocks to be evaluated in the buffer named "\*Python\*", which is the
+default buffer name for the buffer connected to an inferior python process. This
+is useful for interactive development. It gives you a REPL to work with rather
+than having to constantly evaluate source code blocks and view the results
+output to try any change.
+
+Another note along those lines is that when source code blocks are evaluated,
+some unnecessary output is printed in the ~*Python*~ buffer. Adding ~:results
+output~ to a code block will minimize that noise.
+#+END_COMMENT
+
+* Overview
+
+This Python package provides utilities for extracting tabular data from PDF
+files and images of tables.
+
+Given an image that contains a table...
+
+#+ATTR_HTML: :width 25%
+[[file:resources/examples/example-page.png]]
+
+Extract the the text into a CSV format...
+
+#+BEGIN_EXAMPLE
+PRIZE,ODDS 1 IN:,# OF WINNERS*
+$3,9.09,"282,447"
+$5,16.66,"154,097"
+$7,40.01,"64,169"
+$10,26.67,"96,283"
+$20,100.00,"25,677"
+$30,290.83,"8,829"
+$50,239.66,"10,714"
+$100,919.66,"2,792"
+$500,"6,652.07",386
+"$40,000","855,899.99",3
+1,i223,
+Toa,,
+,,
+,,"* Based upon 2,567,700"
+#+END_EXAMPLE
+
+The package is split into modules with narrow focuses.
+
+- ~pdf_to_images~ uses Poppler and ImageMagick to extract images from a PDF.
+- ~extract_tables~ finds and extracts table-looking things from an image.
+- ~extract_cells~ extracts and orders cells from a table.
+- ~ocr_image~ uses Tesseract to OCR the text from an image of a cell.
+- ~ocr_to_csv~ converts into a CSV the directory structure that ~ocr_image~ outputs.
+
+** Requirements
+
+Tested with the following versions of the following packages
+
+*** Python packages
+- numpy 1.19.2
+- opencv-python 4.4.0.44
+- pytesseract 0.3.6
+
+*** External
+- ~pdfimages~ from Poppler 20.09.0
+- ~tesseract~ 5.0.0
+- ~mogfrify~ ImageMagick 7.0.10
+
+** Contributing
+
+This package was created in a [[https://en.wikipedia.org/wiki/Literate_programming][literate programming]] style with the help of [[https://orgmode.org/worg/org-contrib/babel/intro.html][Babel]].
+
+The unfortunate downside is the obscurity of the tooling. It creates a bit of a
+barrier for contributors who aren't already familiar with Emacs and Babel.
+
+** Example usage
+
+Here is an example of a shell script that uses each module to turn a pdf with a
+table into CSV output.
+
+Depending on your needs, you may not need all of these steps. If you already
+have an image of a table, you can jum straight to extracting the cells.
+
+Each piece is its own python module, so you can also simply import the pieces
+you need into your own python projects and use them as needed.
+
+#+NAME: ocr_tables
+#+BEGIN_SRC shell :results none :tangle ocr_tables :tangle-mode (identity #o755)
+#!/bin/sh
+
+PDF=$1
+
+python -m table_ocr.pdf_to_images $PDF | grep .png > /tmp/pdf-images.txt
+cat /tmp/pdf-images.txt | xargs -I{} python -m table_ocr.extract_tables {}  | grep table > /tmp/extracted-tables.txt
+cat /tmp/extracted-tables.txt | xargs -I{} python -m table_ocr.extract_cells {} | grep cells > /tmp/extracted-cells.txt
+cat /tmp/extracted-cells.txt | xargs -I{} python -m table_ocr.ocr_image {}
+for image in $(cat /tmp/extracted-tables.txt); do
+    dir=$(dirname $image)
+    python -m table_ocr.ocr_to_csv $(find $dir/cells -name "*.txt")
+done
+#+END_SRC
+
+Any extra args you pass after the image path to ~python -m table_ocr.ocr_image~ will be passed directly to tesseract as options. If you don't pass anything, reasonable english defaults are used.
+
+** Possible improvements
+
+Detect text with the stroke-width-transform alogoritm. https://zablo.net/blog/post/stroke-width-transform-swt-python/index.html
+
+* Preparing data
+
+Not all pdfs need to be sent through OCR to extract the text content. If you can
+click and drag to highlight text in the pdf, then the tools in this library
+probably aren't necessary.
+
+** Converting PDFs to images
+
+This code calls out to [[https://manpages.debian.org/testing/poppler-utils/pdfimages.1.en.html][pdfimages]] from [[https://poppler.freedesktop.org/][Poppler]].
+
+#+NAME: pdf-to-images
+#+BEGIN_SRC python :results none
+# Wrapper around the Poppler command line utility "pdfimages" and helpers for
+# finding the output files of that command.
+def pdf_to_images(pdf_filepath):
+    """
+    Turn a pdf into images
+    Returns the filenames of the created images sorted lexicographically.
+    """
+    directory, filename = os.path.split(pdf_filepath)
+    image_filenames = pdfimages(pdf_filepath)
+
+    # Since pdfimages creates a number of files named each for there page number
+    # and doesn't return us the list that it created
+    return sorted([os.path.join(directory, f) for f in image_filenames])
+
+
+def pdfimages(pdf_filepath):
+    """
+    Uses the `pdfimages` utility from Poppler
+    (https://poppler.freedesktop.org/). Creates images out of each page. Images
+    are prefixed by their name sans extension and suffixed by their page number.
+
+    This should work up to pdfs with 999 pages since find matching files in dir
+    uses 3 digits in its regex.
+    """
+    directory, filename = os.path.split(pdf_filepath)
+    if not os.path.isabs(directory):
+        directory = os.path.abspath(directory)
+    filename_sans_ext = filename.split(".pdf")[0]
+
+    # pdfimages outputs results to the current working directory
+    with working_dir(directory):
+        subprocess.run(["pdfimages", "-png", filename, filename.split(".pdf")[0]])
+
+    image_filenames = find_matching_files_in_dir(filename_sans_ext, directory)
+    logger.debug(
+        "Converted {} into files:\n{}".format(pdf_filepath, "\n".join(image_filenames))
+    )
+    return image_filenames
+
+
+def find_matching_files_in_dir(file_prefix, directory):
+    files = [
+        filename
+        for filename in os.listdir(directory)
+        if re.match(r"{}-\d{{3}}.*\.png".format(re.escape(file_prefix)), filename)
+    ]
+    return files
+#+END_SRC
+
+** Detecting image orientation and applying rotation.
+
+Tesseract can detect orientation and we can then use [[https://www.imagemagick.org/script/mogrify.php][ImageMagick's mogrify]] to
+rotate the image.
+
+Here's an example of the output we get from orientation detection with
+Tesseract.
+
+#+BEGIN_EXAMPLE
+➜  example/ tesseract --psm 0 example-000.png -
+Page number: 0
+Orientation in degrees: 90
+Rotate: 270
+Orientation confidence: 26.86
+Script: Latin
+Script confidence: 2.44
+#+END_EXAMPLE
+
+The following are some helpers to detect orientation of the images that Poppler
+extracted and, if the images are rotated or skewed, use ImageMagick's `mogrify`
+to correct the rotation. This makes OCR more straightforward.
+
+#+NAME: fix-orientation
+#+BEGIN_SRC python :results none
+def preprocess_img(filepath, tess_params=None):
+    """Processing that involves running shell executables,
+    like mogrify to rotate.
+
+    Uses tesseract to detect rotation.
+
+    Orientation and script detection is only available for legacy tesseract
+    (--oem 0). Some versions of tesseract will segfault if you let it run OSD
+    with the default oem (3).
+    """
+    if tess_params is None:
+        tess_params = ["--psm", "0", "--oem", "0"]
+    rotate = get_rotate(filepath, tess_params)
+    logger.debug("Rotating {} by {}.".format(filepath, rotate))
+    mogrify(filepath, rotate)
+
+
+def get_rotate(image_filepath, tess_params):
+    """
+    """
+    tess_command = ["tesseract"] + tess_params + [image_filepath, "-"]
+    output = (
+        subprocess.check_output(tess_command)
+        .decode("utf-8")
+        .split("\n")
+    )
+    output = next(l for l in output if "Rotate: " in l)
+    output = output.split(": ")[1]
+    return output
+
+
+def mogrify(image_filepath, rotate):
+    subprocess.run(["mogrify", "-rotate", rotate, image_filepath])
+#+END_SRC
+
+* Detecting tables
+
+This answer from opencv.org was heavily referenced while writing the code around
+table detection:
+https://answers.opencv.org/question/63847/how-to-extract-tables-from-an-image/.
+
+It's much easier to OCR a table when the table is the only thing in the image.
+This code detects tables in an image and returns a list of images of just the
+tables, no surrounding text or noise.
+
+The blurring, thresholding, and line detection is used here as well as later on
+for cell extraction. They are good techniques for cleaning an image up in a way
+that makes things like shape detection more accurate.
+
+#+NAME: detect-tables
+#+BEGIN_SRC python :results none :noweb yes
+def find_tables(image):
+    <<blur>>
+    <<threshold>>
+    <<lines-of-table>>
+    contours, heirarchy = cv2.findContours(
+        mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE,
+    )
+
+    MIN_TABLE_AREA = 1e5
+    contours = [c for c in contours if cv2.contourArea(c) > MIN_TABLE_AREA]
+    perimeter_lengths = [cv2.arcLength(c, True) for c in contours]
+    epsilons = [0.1 * p for p in perimeter_lengths]
+    approx_polys = [cv2.approxPolyDP(c, e, True) for c, e in zip(contours, epsilons)]
+    bounding_rects = [cv2.boundingRect(a) for a in approx_polys]
+
+    # The link where a lot of this code was borrowed from recommends an
+    # additional step to check the number of "joints" inside this bounding rectangle.
+    # A table should have a lot of intersections. We might have a rectangular image
+    # here though which would only have 4 intersections, 1 at each corner.
+    # Leaving that step as a future TODO if it is ever necessary.
+    images = [image[y:y+h, x:x+w] for x, y, w, h in bounding_rects]
+    return images
+#+END_SRC
+
+Here is an the an example of the result of the ~find_tables~ function.
+
+#+HEADER: :post html-image-size(text=*this*, width="500px")
+#+BEGIN_SRC python :noweb-ref test-detect-table :noweb strip-export :results none
+import cv2
+<<detect-tables>>
+image_filename = "resources/examples/example-page.png"
+image = cv2.imread(image_filename, cv2.IMREAD_GRAYSCALE)
+image = find_tables(image)[0]
+cv2.imwrite("resources/examples/example-table.png", image)
+#+END_SRC
+
+#+BEGIN_CENTER
+#+ATTR_HTML: :width 250px
+[[file:resources/examples/example-page.png]]
+
+↓
+
+#+ATTR_HTML: :width 250px
+[[file:resources/examples/example-table.png]]
+#+END_CENTER
+
+** Improving accuracy
+
+It's likely that some images will contain tables that aren't accurately
+recognized by the code above. The code will then need to be made more robust.
+But how will we know that changes to the code don't break the detection of
+tables that were previously detected?
+
+It might be good to add some type of test suite in the future that contains a
+spec that matches a pdf with the pages and pixel coordinates of the detected
+tables. The coordinates would need to have a range. Something like
+"example-1.pdf, page-2.png, [450:470, 200:210, 800:820, 1270:1290]" where the
+elements of the list are valid x, y, w, h ranges. So the test will pass if if
+the x, y, width and height are anywhere in that range.
+
+* OCR tables
+
+Tesseract does not perform well when run on images of tables. It performs best
+when given a single line of text with no extra noise.
+
+Therefore, our next task is to find and extract the bounding box of each cell in
+the table. Run tesseract on each cell. Print a comma seperated output.
+
+We'll start with an image shown at the end of the previous section.
+
+** Training Tesseract
+
+Tesseract is used for recognizing characters. It is not involved in extracting the tables from an image or in extracting cells from the table.
+
+It's a very good idea to train tesseract. Accuracy will improve tremendously.
+
+Clone the tesstrain repo at [[https://github.com/tesseract-ocr/tesstrain]].
+
+Run the [[ocr_tables][~ocr_tables~]] script on a few pdfs to generate some training data. That
+script outputs pairs of ~.png~ and ~.gt.txt~ files that can be used by
+tesstrain.
+
+Make sure the ~.gt.txt~ files contain an accurate recognition of the
+corresponding image. Since the first few runs will be untrained, you'll probably
+need to fix up a few of the text files.
+
+Once they are accurate, move them to a new subdirectory of the tesstrain repo;
+~tesstrain/data/<model-name>-ground-truth/~.
+
+You'll also need to clone the ~tessdata_best~ repo,
+[[https://github.com/tesseract-ocr/tessdata_best]] and the
+https://github.com/tesseract-ocr/langdata to use as the start of the
+training model.
+
+I'm actually not sure how much the punctuation and numbers from ~langdata~ help.
+I didn't keep accurate records while playing with the training, I don't
+thoroughly understand it, and it's not profitable for me to explore it at the
+moment. It worked for my purposes and that has been good enough.
+
+#+BEGIN_EXAMPLE
+make training MODEL_NAME=table-ocr START_MODEL=eng TESSDATA=~/src/tessdata_best PUNC_FILE=~/src/langdata/eng/eng.punc NUMBERS_FILE=~/src/langdata/eng/eng.numbers
+#+END_EXAMPLE
+
+Once the training is complete, there will be a new file
+~tesstrain/data/<model-name>.traineddata~. Copy that file to the directory
+Tesseract searches for models. On my machine, it was ~/usr/local/share/tessdata/~.
+
+*** Training tips
+
+Here is a tip for quickly creating training data.
+
+The output of the ~ocr_cells~ script will be a directory named ~ocr_data~ that
+will have two files for each cell. One file is the image of the cell and the
+other file is the OCR text.
+
+You'll want to compare each image to its OCR text to check for accuracy. If
+the text doesn't match, you'll want to update the text and add the image to the
+training data.
+
+The fastest way to do this is with ~feh~.
+
+~feh~ lets you view an image and a caption at the same time and lets you edit
+the caption from within ~feh~.
+
+~feh~ expects the captions to be named ~<image-name>.txt~, so use a little
+shell-fu to do a quick rename.
+
+#+BEGIN_SRC shell :eval no
+for f in *.txt; do f1=$(cut -d"." -f1 <(echo $f)); mv $f ${f1}.png.txt; done
+#+END_SRC
+
+Then run ~feh -K .~ to specify the current directory as the caption directory.
+This will open a window with the first image in the directory and its caption.
+
+Press ~c~ to edit the caption (if needed) and ~n~/~p~ to move to the
+next/previons images. Press ~q~ to quit.
+
+When finished, rename the files back to the filename structure that Tesseract
+looks for in training.
+
+#+BEGIN_SRC shell :eval no
+for f in *.txt; do f1=$(cut -d"." -f1 <(echo $f)); mv $f ${f1}.gt.txt; done
+#+END_SRC
+
+** Blur
+
+Blurring helps to make noise less noisy so that the overall structure of an
+image is more detectable.
+
+That gray row at the bottom is kind of noisy. If we don't somehow clean it up,
+OpenCV will detect all sorts of odd shapes in there and it will throw off our
+cell detection.
+
+Cleanup can be accomplished with a blur followed by some thresholding.
+
+#+BEGIN_SRC python :noweb-ref blur :results none
+BLUR_KERNEL_SIZE = (17, 17)
+STD_DEV_X_DIRECTION = 0
+STD_DEV_Y_DIRECTION = 0
+blurred = cv2.GaussianBlur(image, BLUR_KERNEL_SIZE, STD_DEV_X_DIRECTION, STD_DEV_Y_DIRECTION)
+#+END_SRC
+
+#+HEADER: :post html-image-size(text=*this*, width="500px")
+#+BEGIN_SRC python :noweb no-export :results none :exports both
+image = ~cv2.imread("resources/examples/example-table.png", cv2.IMREAD_GRAYSCALE)
+<<blur>>
+cv2.imwrite("resources/examples/example-table-blurred.png", blurred)
+#+END_SRC
+
+#+ATTR_HTML: :width 500px :height 100%
+[[file:resources/examples/example-table-blurred.png]]
+
+** Threshold
+
+We've got a bunch of pixels that are gray. Thresholding will turn them all
+either black or white. Having all black or white pixels lets us do morphological
+transformations like erosion and dilation.
+
+#+BEGIN_SRC python :noweb-ref threshold :results none
+MAX_COLOR_VAL = 255
+BLOCK_SIZE = 15
+SUBTRACT_FROM_MEAN = -2
+
+img_bin = cv2.adaptiveThreshold(
+    ~blurred,
+    MAX_COLOR_VAL,
+    cv2.ADAPTIVE_THRESH_MEAN_C,
+    cv2.THRESH_BINARY,
+    BLOCK_SIZE,
+    SUBTRACT_FROM_MEAN,
+)
+#+END_SRC
+
+#+HEADER: :post html-image-size(text=*this*, width="500px")
+#+BEGIN_SRC python :noweb no-export :results none :exports both
+<<threshold>>
+cv2.imwrite("resources/examples/example-table-thresholded.png", img_bin)
+#+END_SRC
+
+#+ATTR_HTML: :width 500px :height 100%
+[[file:resources/examples/example-table-thresholded.png]]
+
+** Finding the vertical and horizontal lines of the table
+
+#+BEGIN_SRC python :noweb-ref lines-of-table :results none
+vertical = horizontal = img_bin.copy()
+SCALE = 5
+image_width, image_height = horizontal.shape
+horizontal_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (int(image_width / SCALE), 1))
+horizontally_opened = cv2.morphologyEx(img_bin, cv2.MORPH_OPEN, horizontal_kernel)
+vertical_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (1, int(image_height / SCALE)))
+vertically_opened = cv2.morphologyEx(img_bin, cv2.MORPH_OPEN, vertical_kernel)
+
+horizontally_dilated = cv2.dilate(horizontally_opened, cv2.getStructuringElement(cv2.MORPH_RECT, (40, 1)))
+vertically_dilated = cv2.dilate(vertically_opened, cv2.getStructuringElement(cv2.MORPH_RECT, (1, 60)))
+
+mask = horizontally_dilated + vertically_dilated
+#+END_SRC
+
+Note: There's a wierd issue with the results of the example below when it's
+evaluated as part of an export or a full-buffer evaluation. If you evaluate the
+example by itself, it looks the way it's intended. If you evaluate it as part of
+an entire buffer evaluation, like during export, it's distorted.
+
+#+HEADER: :post html-image-size(text=*this*, width="500px")
+#+BEGIN_SRC python :noweb no-export :results none :exports both
+<<lines-of-table>>
+cv2.imwrite("resources/examples/example-table-lines.png", mask)
+#+END_SRC
+
+#+ATTR_HTML: :width 500px
+[[file:resources/examples/example-table-lines.png]]
+
+** Finding the contours
+
+Blurring and thresholding allow us to find the lines. Opening the lines allows
+us to find the contours.
+
+An "Opening" is an erosion followed by a dilation. Great examples and
+descriptions of each morphological operation can be found at
+[[https://docs.opencv.org/trunk/d9/d61/tutorial_py_morphological_ops.html][https://docs.opencv.org/trunk/d9/d61/tutorial_py_morphological_ops.html]].
+
+#+BEGIN_QUOTE
+Contours can be explained simply as a curve joining all the continuous points
+(along the boundary), having same color or intensity. The contours are a useful
+tool for shape analysis and object detection and recognition.
+#+END_QUOTE
+
+We can search those contours to find rectangles of certain size.
+
+To do that, we can use OpenCV's ~approxPolyEP~ function. It takes as arguments
+the contour (list of contiguous points), and a number representing how different
+the polygon perimeter length can be from the true perimeter length of the
+contour. ~0.1~ (10%) seems to be a good value. The difference in perimeter
+length between a 4-sided polygon and a 3-sided polygon is greater than 10% and
+the difference between a 5+ sided polygon and a 4-sided polygon is less than
+10%. So a 4-sided polygon is the polygon with the fewest sides that leaves the
+difference in perimeter length within our 10% threshold.
+
+Then we just get the bounding rectangle of that polygon and we have our cells!
+
+We might need to do a little more filtering of those rectangles though. We might
+have accidentally found some noise such as another image on the page or a title
+header bar or something. If we know our cells are all within a certain size (by
+area of pixels) then we can filter out the junk cells by removing cells
+above/below certain sizes.
+
+#+NAME: bounding-rects
+#+BEGIN_SRC python :results none
+contours, heirarchy = cv2.findContours(
+    mask, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE,
+)
+
+perimeter_lengths = [cv2.arcLength(c, True) for c in contours]
+epsilons = [0.05 * p for p in perimeter_lengths]
+approx_polys = [cv2.approxPolyDP(c, e, True) for c, e in zip(contours, epsilons)]
+
+# Filter out contours that aren't rectangular. Those that aren't rectangular
+# are probably noise.
+approx_rects = [p for p in approx_polys if len(p) == 4]
+bounding_rects = [cv2.boundingRect(a) for a in approx_polys]
+
+# Filter out rectangles that are too narrow or too short.
+MIN_RECT_WIDTH = 40
+MIN_RECT_HEIGHT = 10
+bounding_rects = [
+    r for r in bounding_rects if MIN_RECT_WIDTH < r[2] and MIN_RECT_HEIGHT < r[3]
+]
+
+# The largest bounding rectangle is assumed to be the entire table.
+# Remove it from the list. We don't want to accidentally try to OCR
+# the entire table.
+largest_rect = max(bounding_rects, key=lambda r: r[2] * r[3])
+bounding_rects = [b for b in bounding_rects if b is not largest_rect]
+
+cells = [c for c in bounding_rects]
+#+END_SRC
+
+** Sorting the bounding rectangles
+
+We want to process these from left-to-right, top-to-bottom.
+
+I've thought of a straightforward algorithm for it, but it could probably be
+made more efficient.
+
+We'll find the most rectangle with the most top-left corner. Then we'll find all
+of the rectangles that have a center that is within the top-y and bottom-y
+values of that top-left rectangle. Then we'll sort those rectangles by the x
+value of their center. We'll remove those rectangles from the list and repeat.
+
+#+NAME: sort-contours
+#+BEGIN_SRC python :results none
+def cell_in_same_row(c1, c2):
+    c1_center = c1[1] + c1[3] - c1[3] / 2
+    c2_bottom = c2[1] + c2[3]
+    c2_top = c2[1]
+    return c2_top < c1_center < c2_bottom
+
+orig_cells = [c for c in cells]
+rows = []
+while cells:
+    first = cells[0]
+    rest = cells[1:]
+    cells_in_same_row = sorted(
+        [
+            c for c in rest
+            if cell_in_same_row(c, first)
+        ],
+        key=lambda c: c[0]
+    )
+
+    row_cells = sorted([first] + cells_in_same_row, key=lambda c: c[0])
+    rows.append(row_cells)
+    cells = [
+        c for c in rest
+        if not cell_in_same_row(c, first)
+    ]
+
+# Sort rows by average height of their center.
+def avg_height_of_center(row):
+    centers = [y + h - h / 2 for x, y, w, h in row]
+    return sum(centers) / len(centers)
+
+rows.sort(key=avg_height_of_center)
+#+END_SRC
+
+To test if this code works, let's try sorting the bounding rectangles and
+numbering them from right to left, top to bottom.
+
+#+HEADER: :post html-image-size(text=*this*, width="500px")
+#+BEGIN_SRC python :noweb no-export :results none :exports both
+import cv2
+image = cv2.imread("resources/examples/example-table.png", cv2.IMREAD_GRAYSCALE)
+<<blur>>
+<<threshold>>
+<<lines-of-table>>
+<<bounding-rects>>
+<<sort-contours>>
+
+FONT_SCALE = 0.7
+FONT_COLOR = (127, 127, 127)
+for i, row in enumerate(rows):
+    for j, cell in enumerate(row):
+        x, y, w, h = cell
+        cv2.putText(
+            image,
+            "{},{}".format(i, j),
+            (int(x + w - w / 2), int(y + h - h / 2)),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            FONT_SCALE,
+            FONT_COLOR,
+            2,
+        )
+cv2.imwrite("resources/examples/example-table-cells-numbered.png", image)
+#+END_SRC
+
+#+ATTR_HTML: :width 500px :height 100%
+[[file:resources/examples/example-table-cells-numbered.png]]
+
+#+NAME: extract-cells-from-table
+#+BEGIN_SRC python :noweb yes :eval no
+def extract_cell_images_from_table(image):
+    <<blur>>
+    <<threshold>>
+    <<lines-of-table>>
+    <<bounding-rects>>
+    <<sort-contours>>
+    cell_images_rows = []
+    for row in rows:
+        cell_images_row = []
+        for x, y, w, h in row:
+            cell_images_row.append(image[y:y+h, x:x+w])
+        cell_images_rows.append(cell_images_row)
+    return cell_images_rows
+#+END_SRC
+
+#+HEADER: :post html-image-size(text=*this*, width="200px")
+#+BEGIN_SRC python :noweb no-export :results none :exports both
+<<extract-cells-from-table>>
+image = cv2.imread("resources/examples/example-table.png", cv2.IMREAD_GRAYSCALE)
+cell_images_rows = extract_cell_images_from_table(image)
+cv2.imwrite("resources/examples/example-table-cell-1-1.png", cell_images_rows[1][1])
+#+END_SRC
+
+#+ATTR_HTML: :width 200px :height 100%
+[[file:resources/examples/example-table-cell-1-1.png]]
+
+** Cropping each cell to the text
+
+OCR with Tesseract works best when there is about 10 pixels of white border
+around the text.
+
+Our bounding rectangles may have picked up some stray pixels from the horizontal
+and vertical lines of the cells in the table. It's probobly just a few pixels,
+much fewer than the width of the text. If that's the case, then we can remove
+that noise with a simple open morph.
+
+Once the stray border pixels have been removed, we can expand our border using
+~copyMakeBorder~.
+
+#+BEGIN_SRC python :eval no :noweb-ref crop-to-text
+def crop_to_text(image):
+    MAX_COLOR_VAL = 255
+    BLOCK_SIZE = 15
+    SUBTRACT_FROM_MEAN = -2
+
+    img_bin = cv2.adaptiveThreshold(
+        ~image,
+        MAX_COLOR_VAL,
+        cv2.ADAPTIVE_THRESH_MEAN_C,
+        cv2.THRESH_BINARY,
+        BLOCK_SIZE,
+        SUBTRACT_FROM_MEAN,
+    )
+
+    img_h, img_w = image.shape
+    horizontal_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (int(img_w * 0.5), 1))
+    vertical_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (1, int(img_h * 0.7)))
+    horizontal_lines = cv2.morphologyEx(img_bin, cv2.MORPH_OPEN, horizontal_kernel)
+    vertical_lines = cv2.morphologyEx(img_bin, cv2.MORPH_OPEN, vertical_kernel)
+    both = horizontal_lines + vertical_lines
+    cleaned = img_bin - both
+
+    # Get rid of little noise.
+    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
+    opened = cv2.morphologyEx(cleaned, cv2.MORPH_OPEN, kernel)
+    opened = cv2.dilate(opened, kernel)
+
+    contours, hierarchy = cv2.findContours(opened, cv2.RETR_LIST, cv2.CHAIN_APPROX_SIMPLE)
+    bounding_rects = [cv2.boundingRect(c) for c in contours]
+    NUM_PX_COMMA = 6
+    MIN_CHAR_AREA = 5 * 9
+    char_sized_bounding_rects = [(x, y, w, h) for x, y, w, h in bounding_rects if w * h > MIN_CHAR_AREA]
+    if char_sized_bounding_rects:
+        minx, miny, maxx, maxy = math.inf, math.inf, 0, 0
+        for x, y, w, h in char_sized_bounding_rects:
+            minx = min(minx, x)
+            miny = min(miny, y)
+            maxx = max(maxx, x + w)
+            maxy = max(maxy, y + h)
+        x, y, w, h = minx, miny, maxx - minx, maxy - miny
+        cropped = image[y:min(img_h, y+h+NUM_PX_COMMA), x:min(img_w, x+w)]
+    else:
+        # If we morphed out all of the text, assume an empty image.
+        cropped = MAX_COLOR_VAL * np.ones(shape=(20, 100), dtype=np.uint8)
+    bordered = cv2.copyMakeBorder(cropped, 5, 5, 5, 5, cv2.BORDER_CONSTANT, None, 255)
+    return bordered
+#+END_SRC
+
+#+HEADER: :post html-image-size(text=*this*, width="200px")
+#+BEGIN_SRC python :noweb no-export :results none :exports both
+import cv2
+import numpy as np
+<<crop-to-text>>
+image = cv2.imread("resources/examples/example-table-cell-1-1.png", cv2.IMREAD_GRAYSCALE)
+image = crop_to_text(image)
+cv2.imwrite("resources/examples/example-table-cell-1-1-cropped.png", image)
+#+END_SRC
+
+#+ATTR_HTML: :width 200px :height 100%
+[[file:resources/examples/example-table-cell-1-1-cropped.png]]
+
+** OCR each cell
+
+If we cleaned up the images well enough, we might get some accurate OCR!
+
+There is plenty that could have gone wrong along the way.
+
+The first step to troubleshooting is to view the intermediate images and see if
+there's something about your image that is obviously abnormal, like some really
+thick noise or a wrongly detected table.
+
+If everything looks reasonable but the OCR is doing something like turning a
+period into a comma, then you might need to do some custom Tesseract training.
+
+#+BEGIN_SRC python :noweb-ref ocr-image :eval no
+def ocr_image(image, config):
+    return pytesseract.image_to_string(
+        image,
+        config=config
+    )
+#+END_SRC
+
+The second argument passed to ~ocr_image~ is a string of the command line arguments passed directly to ~tesseract~. You can view the available options at [[https://github.com/tesseract-ocr/tesseract/blob/master/doc/tesseract.1.asc#options]]
+
+If no options are passed to ~tesseract~, then language defaults to english. This means ~tesseract~ needs to be able to find a file named ~eng.traineddata~ on whatever path it searches for languages.
+
+This python package comes with ~eng.traineddata~ and ~table-ocr.traineddata~. ~table-ocr.traineddata~ is a personal model that I've found to be more accurate for my use case. You should train your own to maximize accuracy.
+
+When you ~pip install~ this package, the traineddata gets copied to a ~tessdata~ folder in the same directory in which ~pip~ installs the package.
+
+The ~ocr_image~ package in this repo defaults to using the ~--tessdata-dir~ option to the package's ~tessdata~ directory in the package install location and the ~-l~ option to the ~table_ocr~ language.
+
+#+BEGIN_SRC python :noweb no-export :exports both
+import pytesseract
+import cv2
+import numpy as np
+import math
+image = cv2.imread("resources/examples/example-table-cell-1-1.png", cv2.IMREAD_GRAYSCALE)
+<<crop-to-text>>
+<<ocr-image>>
+image = crop_to_text(image)
+ocr_image(image, "--psm 7")
+#+END_SRC
+
+#+RESULTS:
+: 9.09
+
+* Demo
+
+I wanted to include a demo script that can be used as a quick example.
+
+To run the demo, simply:
+
+1. ~pip3 install table_ocr~
+2. ~python3 -m table_ocr.util.url_img_to_csv "https://2ptidz4dnkwy36mu2on9rps1-wpengine.netdna-ssl.com/wp-content/uploads/2015/11/Scanning-Mirror-Data-1.png"~
+
+
+All of the modules work with filepaths, so whatever you're working with needs to be saved to the fileystem so we can access it by its filename. There is no particular reason for this other than it was the most convenient implementation at the time. This just as well could be modified to accept file-like objects for a lot of the code and we could do all of the work in-memory without storing things to disk.
+
+#+NAME: helper download image to tempdir
+#+BEGIN_SRC python
+def download_image_to_tempdir(url, filename=None):
+    if filename is None:
+        filename = os.path.basename(url)
+    response = requests.get(url, stream=True)
+    tempdir = table_ocr.util.make_tempdir("demo")
+    filepath = os.path.join(tempdir, filename)
+    with open(filepath, 'wb') as f:
+        for chunk in response.iter_content():
+            f.write(chunk)
+    return filepath
+#+END_SRC
+
+This demo starts from an image rather than from a PDF. The concepts should still be apparent. But starting from a PDF would make the demo less demo-able since it would require the person running the demo to have Poppler installed for ~pdftoimages~.
+
+The ~main~ function of ~extract_tables~ takes a list of filepaths of images. It will attempt to find bounding boxes of all tables in the images and return a list of tuples of (<image filepath>, <list of filepaths of found and cropped out tables>)
+
+#+BEGIN_SRC python :tangle table_ocr/demo/__init__.py :mkdirp yes
+
+#+END_SRC
+
+#+NAME: demo main
+#+BEGIN_SRC python :tangle table_ocr/demo/__main__.py :mkdirp yes :noweb yes
+<<demo imports>>
+<<helper download image to tempdir>>
+
+def main(url):
+    image_filepath = download_image_to_tempdir(url)
+    image_tables = table_ocr.extract_tables.main([image_filepath])
+    print("Running `{}`".format(f"extract_tables.main([{image_filepath}])."))
+    print("Extracted the following tables from the image:")
+    print(image_tables)
+    for image, tables in image_tables:
+        print(f"Processing tables for {image}.")
+        for table in tables:
+            print(f"Processing table {table}.")
+            cells = table_ocr.extract_cells.main(table)
+            ocr = [
+                table_ocr.ocr_image.main(cell, None)
+                for cell in cells
+            ]
+            print("Extracted {} cells from {}".format(len(ocr), table))
+            print("Cells:")
+            for c, o in zip(cells[:3], ocr[:3]):
+                with open(o) as ocr_file:
+                    # Tesseract puts line feeds at end of text.
+                    # Stript it out.
+                    text = ocr_file.read().strip()
+                    print("{}: {}".format(c, text))
+            # If we have more than 3 cells (likely), print an ellipses
+            # to show that we are truncating output for the demo.
+            if len(cells) > 3:
+                print("...")
+            return table_ocr.ocr_to_csv.text_files_to_csv(ocr)
+
+if __name__ == "__main__":
+    csv_output = main(sys.argv[1])
+    print()
+    print("Here is the entire CSV output:")
+    print()
+    print(csv_output)
+#+END_SRC
+
+#+NAME: demo imports
+#+BEGIN_SRC python
+import os
+import sys
+
+import requests
+import table_ocr.util
+import table_ocr.extract_tables
+import table_ocr.extract_cells
+import table_ocr.ocr_image
+import table_ocr.ocr_to_csv
+#+END_SRC
+
+* Files
+:PROPERTIES:
+:header-args: :mkdirp yes :noweb yes
+:END:
+
+#+BEGIN_SRC python :tangle table_ocr/__init__.py :mkdirp yes :results none
+
+#+END_SRC
+
+** setup.py
+#+BEGIN_SRC python :tangle setup.py :results none
+import os
+import setuptools
+
+this_dir = os.path.abspath(os.path.dirname(__file__))
+with open(os.path.join(this_dir, "README.txt"), encoding="utf-8") as f:
+    long_description = f.read()
+
+setuptools.setup(
+    name="table_ocr",
+    version="0.2.5",
+    author="Eric Ihli",
+    author_email="eihli@owoga.com",
+    description="Extract text from tables in images.",
+    long_description=long_description,
+    long_description_content_type="text/plain",
+    url="https://github.com/eihli/image-table-ocr",
+    packages=setuptools.find_packages(),
+    package_data={
+        "table_ocr": ["tessdata/table-ocr.traineddata", "tessdata/eng.traineddata"]
+    },
+    classifiers=[
+        "Programming Language :: Python :: 3",
+        "License :: OSI Approved :: MIT License",
+        "Operating System :: OS Independent",
+    ],
+    install_requires=["pytesseract~=0.3", "opencv-python~=4.2", "numpy~=1.19", "requests>=2"],
+    python_requires=">=3.6",
+)
+#+END_SRC
+
+** table_ocr
+*** table_ocr/__init__.py
+#+BEGIN_SRC python :tangle table_ocr/__init__.py :results none :exports none
+
+#+END_SRC
+
+*** table_ocr/util.py
+
+#+BEGIN_SRC python :tangle table_ocr/util.py :results none
+from contextlib import contextmanager
+import functools
+import logging
+import os
+import tempfile
+
+<<get-logger>>
+
+@contextmanager
+def working_dir(directory):
+    original_working_dir = os.getcwd()
+    try:
+        os.chdir(directory)
+        yield directory
+    finally:
+        os.chdir(original_working_dir)
+
+
+def make_tempdir(identifier):
+    return tempfile.mkdtemp(prefix="{}_".format(identifier))
+#+END_SRC
+
+*** table_ocr/pdf_to_images/
+**** table_ocr/pdf_to_images/__init__.py
+#+NAME: pdf_to_images/__init__.py
+#+HEADER: :tangle table_ocr/pdf_to_images/__init__.py
+#+BEGIN_SRC python :results none
+import os
+import re
+import subprocess
+
+from table_ocr.util import get_logger, working_dir
+
+logger = get_logger(__name__)
+
+<<pdf-to-images>>
+
+<<fix-orientation>>
+#+END_SRC
+
+**** table_ocr/pdf_to_images/__main__.py
+
+Takes a variable number of pdf files and creates images out of each page of the
+file using ~pdfimages~ from Poppler. Images are created in the same directory
+that contains the pdf.
+
+Prints each pdf followed by the images extracted from that pdf followed by a
+blank line.
+
+#+BEGIN_SRC shell :eval no :exports code
+python -m table_ocr.prepare_pdfs /tmp/file1/file1.pdf /tmp/file2/file2.pdf ...
+#+END_SRC
+
+
+#+NAME: pdf_to_images/__main__.py
+#+HEADER: :tangle table_ocr/pdf_to_images/__main__.py
+#+BEGIN_SRC python
+import argparse
+
+from table_ocr.util import working_dir, make_tempdir, get_logger
+from table_ocr.pdf_to_images import pdf_to_images, preprocess_img
+
+logger = get_logger(__name__)
+
+parser = argparse.ArgumentParser()
+parser.add_argument("files", nargs="+")
+
+
+def main(files):
+    pdf_images = []
+    for f in files:
+        pdf_images.append((f, pdf_to_images(f)))
+
+    for pdf, images in pdf_images:
+        for image in images:
+            preprocess_img(image)
+
+    for pdf, images in pdf_images:
+        print("{}\n{}\n".format(pdf, "\n".join(images)))
+
+
+if __name__ == "__main__":
+    args = parser.parse_args()
+    main(args.files)
+#+END_SRC
+
+*** table_ocr/extract_tables/
+**** table_ocr/extract_tables/__init__.py
+
+#+NAME: extract_tables/__init__.py
+#+HEADER: :tangle table_ocr/extract_tables/__init__.py
+#+BEGIN_SRC python
+import os
+import cv2
+
+<<detect-tables>>
+
+def main(files):
+    results = []
+    for f in files:
+        directory, filename = os.path.split(f)
+        image = cv2.imread(f, cv2.IMREAD_GRAYSCALE)
+        tables = find_tables(image)
+        files = []
+        filename_sans_extension = os.path.splitext(filename)[0]
+        if tables:
+            os.makedirs(os.path.join(directory, filename_sans_extension), exist_ok=True)
+        for i, table in enumerate(tables):
+            table_filename = "table-{:03d}.png".format(i)
+            table_filepath = os.path.join(
+                directory, filename_sans_extension, table_filename
+            )
+            files.append(table_filepath)
+            cv2.imwrite(table_filepath, table)
+        if tables:
+            results.append((f, files))
+    # Results is [[<input image>, [<images of detected tables>]]]
+    return results
+#+END_SRC
+
+**** table_ocr/extract_tables/__main__.py
+
+Takes 1 or more image paths as arguments.
+
+Images are opened and read with OpenCV.
+
+Tables are detected and extracted to a new subdirectory of the given image. The
+subdirectory will be the filename sans the extension. The tables inside that
+directory will be named ~table-000.png~.
+
+If you want to do something with the output, like pipe the paths of the
+extracted tables into some other utility, here is a description of the output.
+
+For each image path given as an agument, outputs:
+
+1. The given image path
+2. Paths of extracted tables; seperated by newlines
+3. Empty newline
+
+#+NAME: extract_tables/__main__.py
+#+BEGIN_SRC python :tangle table_ocr/extract_tables/__main__.py :results none
+import argparse
+
+from table_ocr.extract_tables import main
+
+parser = argparse.ArgumentParser()
+parser.add_argument("files", nargs="+")
+args = parser.parse_args()
+files = args.files
+results = main(files)
+for image, tables in results:
+    print("\n".join(tables))
+#+END_SRC
+
+*** table_ocr/extract_cells/
+
+**** table_ocr/extract_cells/__init__.py
+
+#+BEGIN_SRC python :tangle table_ocr/extract_cells/__init__.py
+import cv2
+import os
+
+<<extract-cells-from-table>>
+
+def main(f):
+    results = []
+    directory, filename = os.path.split(f)
+    table = cv2.imread(f, cv2.IMREAD_GRAYSCALE)
+    rows = extract_cell_images_from_table(table)
+    cell_img_dir = os.path.join(directory, "cells")
+    os.makedirs(cell_img_dir, exist_ok=True)
+    paths = []
+    for i, row in enumerate(rows):
+        for j, cell in enumerate(row):
+            cell_filename = "{:03d}-{:03d}.png".format(i, j)
+            path = os.path.join(cell_img_dir, cell_filename)
+            cv2.imwrite(path, cell)
+            paths.append(path)
+    return paths
+#+END_SRC
+
+**** table_ocr/extract_cells/__main__.py
+
+Takes as a command line argument a path to an image of a table.
+
+Detects cells in the table and extracts each cell to an image file in a new
+~/cells/~ subdirectory in the same directory of the given image's path.
+
+Each cell filename is suffixed with ~<row>-<column>~ so that the filenames can
+be sorted lexicographically and will align with reading the cells from
+left-to-right, top-to-bottom.
+
+Prints to stdout the lexicographically sorted list of filenames of the extracted
+cells.
+
+#+BEGIN_SRC python :tangle table_ocr/extract_cells/__main__.py :results none
+import sys
+
+from table_ocr.extract_cells import main
+
+paths = main(sys.argv[1])
+print("\n".join(paths))
+#+END_SRC
+
+*** table_ocr/ocr_image/
+**** table_ocr/ocr_image/__init__.py
+#+BEGIN_SRC python :tangle table_ocr/ocr_image/__init__.py
+import math
+import os
+import sys
+
+import cv2
+import numpy as np
+import pytesseract
+
+def main(image_file, tess_args):
+    """
+    OCR the image and output the text to a file with an extension that is ready
+    to be used in Tesseract training (.gt.txt).
+
+    Tries to crop the image so that only the relevant text gets passed to Tesseract.
+
+    Returns the name of the text file that contains the text.
+    """
+    directory, filename = os.path.split(image_file)
+    filename_sans_ext, ext = os.path.splitext(filename)
+    image = cv2.imread(image_file, cv2.IMREAD_GRAYSCALE)
+    cropped = crop_to_text(image)
+    ocr_data_dir = os.path.join(directory, "ocr_data")
+    os.makedirs(ocr_data_dir, exist_ok=True)
+    out_imagepath = os.path.join(ocr_data_dir, filename)
+    out_txtpath = os.path.join(ocr_data_dir, "{}.gt.txt".format(filename_sans_ext))
+    cv2.imwrite(out_imagepath, cropped)
+    if not tess_args:
+        d = os.path.dirname(sys.modules["table_ocr"].__file__)
+        tessdata_dir = os.path.join(d, "tessdata")
+        tess_args = ["--psm", "7", "-l", "table-ocr", "--tessdata-dir", tessdata_dir]
+    txt = ocr_image(cropped, " ".join(tess_args))
+    with open(out_txtpath, "w") as txt_file:
+        txt_file.write(txt)
+    return out_txtpath
+
+<<crop-to-text>>
+<<ocr-image>>
+#+END_SRC
+**** table_ocr/ocr_image/__main__.py
+
+This does a little bit of cleanup before sending it through tesseract.
+
+Creates images and text files that can be used for training tesseract. See
+https://github.com/tesseract-ocr/tesstrain.
+
+#+BEGIN_SRC python :tangle table_ocr/ocr_image/__main__.py :mkdirp yes :results none
+import argparse
+
+from table_ocr.ocr_image import main
+
+description="""Takes a single argument that is the image to OCR.
+Remaining arguments are passed directly to Tesseract.
+
+Attempts to make OCR more accurate by performing some modifications on the image.
+Saves the modified image and the OCR text in an `ocr_data` directory.
+Filenames are of the format for training with tesstrain."""
+parser = argparse.ArgumentParser(description=description)
+parser.add_argument("image", help="filepath of image to perform OCR")
+
+args, tess_args = parser.parse_known_args()
+print(main(args.image, tess_args))
+#+END_SRC
+*** table_ocr/ocr_to_csv/
+**** table_ocr/ocr_to_csv/__init__.py
+#+BEGIN_SRC python :tangle table_ocr/ocr_to_csv/__init__.py
+import csv
+import io
+import os
+
+
+def text_files_to_csv(files):
+    """Files must be sorted lexicographically
+    Filenames must be <row>-<colum>.txt.
+    000-000.txt
+    000-001.txt
+    001-000.txt
+    etc...
+    """
+    rows = []
+    for f in files:
+        directory, filename = os.path.split(f)
+        with open(f) as of:
+            txt = of.read().strip()
+        row, column = map(int, filename.split(".")[0].split("-"))
+        if row == len(rows):
+            rows.append([])
+        rows[row].append(txt)
+
+    csv_file = io.StringIO()
+    writer = csv.writer(csv_file)
+    writer.writerows(rows)
+    return csv_file.getvalue()
+
+def main(files):
+    return text_files_to_csv(files)
+#+END_SRC
+**** table_ocr/ocr_to_csv/__main__.py
+
+#+BEGIN_SRC python :tangle table_ocr/ocr_to_csv/__main__.py
+import argparse
+import os
+
+from table_ocr.ocr_to_csv import text_files_to_csv
+
+parser = argparse.ArgumentParser()
+parser.add_argument("files", nargs="+")
+
+
+def main(files):
+    print(text_files_to_csv(files))
+
+
+if __name__ == "__main__":
+    args = parser.parse_args()
+    files = args.files
+    files.sort()
+    main(files)
+#+END_SRC
+
+* Utils
+
+The following code lets us specify a size for images when they are exported to
+html.
+
+Org supports specifying an export size for an image by putting the ~#+ATTR_HTML:
+:width 100px~ before the image. But since our images are in a results drawer, we
+need a way for our results drawer to do that for us automatically.
+
+Adding ~#+ATTR_HTML~ after the beginning of the result block introduces a new
+problem. Org-babel no longer recognizes the result as a result block and doesn't
+remove it when a src block is re-evaluated, so we end up just appending new
+results on each evaluation.
+
+There is nothing configurable that will tell org-babel to remove our line. But
+we can define a function to do some cleanup and then add it as a before hook
+with ~advice-add~.
+
+#+NAME: html-image-size
+#+BEGIN_SRC emacs-lisp :var text="" :var width="100%" :var height="100%" :results raw :export code
+(concat "#+ATTR_HTML: :width " width " :height " height "\n[[file:" text "]]")
+#+END_SRC
+
+#+BEGIN_SRC emacs-lisp :results none
+(defun remove-attributes-from-src-block-result (&rest args)
+  (let ((location (org-babel-where-is-src-block-result))
+        (attr-regexp "[ 	]*#\\+ATTR.*$"))
+    (when location
+      (save-excursion
+        (goto-char location)
+        (when (looking-at (concat org-babel-result-regexp ".*$"))
+          (next-line)
+          (while (looking-at attr-regexp)
+            (kill-whole-line)))))))
+
+(advice-add 'org-babel-remove-result :before #'remove-attributes-from-src-block-result)
+(advice-add 'org-babel-execute-src-block :before #'remove-attributes-from-src-block-result)
+#+END_SRC
+
+** Logging
+
+#+BEGIN_SRC python :eval query :noweb-ref get-logger
+def get_logger(name):
+    logger = logging.getLogger(name)
+    lvl = os.environ.get("PY_LOG_LVL", "info").upper()
+    handler = logging.StreamHandler()
+    formatter = logging.Formatter(logging.BASIC_FORMAT)
+    handler.setFormatter(formatter)
+    logger.addHandler(handler)
+    handler.setLevel(lvl)
+    logger.setLevel(lvl)
+    return logger
+#+END_SRC
