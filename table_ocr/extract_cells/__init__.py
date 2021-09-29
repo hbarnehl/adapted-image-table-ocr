@@ -3,7 +3,7 @@ import os
 
 def extract_cell_images_from_table(image):
 # First image is blurred to reduce noise
-    BLUR_KERNEL_SIZE = (17, 17)
+    BLUR_KERNEL_SIZE = (9, 9)
     STD_DEV_X_DIRECTION = 0
     STD_DEV_Y_DIRECTION = 0
     blurred = cv2.GaussianBlur(image, BLUR_KERNEL_SIZE, STD_DEV_X_DIRECTION, STD_DEV_Y_DIRECTION)
@@ -49,7 +49,7 @@ def extract_cell_images_from_table(image):
     bounding_rects = [cv2.boundingRect(a) for a in approx_polys]
     
     # Filter out rectangles that are too narrow or too short.
-    MIN_RECT_WIDTH = 30
+    MIN_RECT_WIDTH = 30     
     MIN_RECT_HEIGHT = 10
     bounding_rects = [
         r for r in bounding_rects if MIN_RECT_WIDTH < r[2] and MIN_RECT_HEIGHT < r[3]
