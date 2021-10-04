@@ -49,7 +49,7 @@ def crop_to_text(image):
 
     img_h, img_w = image.shape
     horizontal_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (int(img_w * 0.5), 1))
-    vertical_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (int(img_h * 0.9), 1))
+    vertical_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (1, int(img_h * 0.9)))
     horizontal_lines = cv2.morphologyEx(img_bin, cv2.MORPH_OPEN, horizontal_kernel)
     vertical_lines = cv2.morphologyEx(img_bin, cv2.MORPH_OPEN, vertical_kernel)
     both = horizontal_lines + vertical_lines
