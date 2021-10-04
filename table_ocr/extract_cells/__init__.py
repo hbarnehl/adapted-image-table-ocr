@@ -22,7 +22,7 @@ def extract_cell_images_from_table(image):
     )
 # Finding Vertical and Horizontal Lines
     vertical = horizontal = img_bin.copy()
-    SCALE = 5
+    SCALE = 10
     image_width, image_height = horizontal.shape
     horizontal_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (int(image_width / SCALE), 1))
     horizontally_opened = cv2.morphologyEx(img_bin, cv2.MORPH_OPEN, horizontal_kernel)
