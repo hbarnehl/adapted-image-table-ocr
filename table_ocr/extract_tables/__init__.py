@@ -19,7 +19,7 @@ def find_tables(image):
         SUBTRACT_FROM_MEAN,
     )
     vertical = horizontal = img_bin.copy()
-    SCALE = 7
+    SCALE = 8
     image_width, image_height = horizontal.shape
     horizontal_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (int(image_width / SCALE), 1))
     horizontally_opened = cv2.morphologyEx(img_bin, cv2.MORPH_OPEN, horizontal_kernel)
