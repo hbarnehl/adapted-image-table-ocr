@@ -22,7 +22,7 @@ def extract_cell_images_from_table(image):
     )
 # Finding Vertical and Horizontal Lines
     vertical = horizontal = img_bin.copy()
-    SCALE = 6
+    SCALE = 5
     image_width, image_height = horizontal.shape
     horizontal_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (int(image_width / SCALE), 1))
     horizontally_opened = cv2.morphologyEx(img_bin, cv2.MORPH_OPEN, horizontal_kernel)
@@ -49,7 +49,7 @@ def extract_cell_images_from_table(image):
     bounding_rects = [cv2.boundingRect(a) for a in approx_polys]
     
     # Filter out rectangles that are too narrow or too short.
-    MIN_RECT_WIDTH = 30     
+    MIN_RECT_WIDTH = 20     
     MIN_RECT_HEIGHT = 10
     bounding_rects = [
         r for r in bounding_rects if MIN_RECT_WIDTH < r[2] and MIN_RECT_HEIGHT < r[3]
