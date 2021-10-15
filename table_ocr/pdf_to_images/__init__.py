@@ -1,6 +1,9 @@
 import os
 import re
 import subprocess
+from scipy.ndimage import interpolation as inter
+import numpy as np
+import cv2
 
 from table_ocr.util import get_logger, working_dir
 
@@ -69,7 +72,7 @@ def preprocess_img(filepath, tess_params=None):
     rotate = get_rotate(filepath, tess_params)
     logger.debug("Rotating {} by {}.".format(filepath, rotate))
     mogrify(filepath, rotate)
-
+    correct_skew(filepath)
 
 def get_rotate(image_filepath, tess_params):
     """
@@ -87,3 +90,30 @@ def get_rotate(image_filepath, tess_params):
 
 def mogrify(image_filepath, rotate):
     subprocess.run(["mogrify", "-rotate", rotate, image_filepath])
+    
+def correct_skew(filepath, delta=1, limit=5):
+	'''This is code taken from https://stackoverflow.com/a/57965160 to auto
+	matically detect skew in the image of a table and apply the appropriate
+	rotation to straigthen it.'''
+	def determine_score(arr, angle):
+		data = inter.rotate(arr, angle, reshape=False, order=0)
+		histogram = np.sum(data, axis=1)
+		score = np.sum((histogram[1:] - histogram[:-1]) ** 2)
+		return histogram, score
+
+	image = cv2.imread((filepath), cv2.IMREAD_GRAYSCALE)
+	thresh = cv2.threshold(image, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)[1] 
+	
+	scores = []
+	angles = np.arange(-limit, limit + delta, delta)
+	for angle in angles:
+		histogram, score = determine_score(thresh, angle)
+		scores.append(score)
+	
+	best_angle = angles[scores.index(max(scores))]
+	
+	(h, w) = image.shape[:2]
+	center = (w // 2, h // 2)
+	M = cv2.getRotationMatrix2D(center, best_angle, 1.0)
+	rotated = cv2.warpAffine(image, M, (w, h), flags=cv2.INTER_CUBIC, borderMode=cv2.BORDER_REPLICATE)
+	cv2.imwrite(filepath, rotated)
