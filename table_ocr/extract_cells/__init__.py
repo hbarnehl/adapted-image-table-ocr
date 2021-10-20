@@ -102,11 +102,34 @@ def extract_cell_images_from_table(image, SCALE):
         cell_images_rows.append(cell_images_row)
     return cell_images_rows
 
-def main(f):
+def check_col(directory, rows):
+    ''' The following lines check whether there are more than two unique max column numbers in the first
+    eleven rows. If that is the case, probably some cells have been fused together horizontally.
+    To remedy this, the scale value of extract_cell_images_from_table will be increased by 1.'''
+    row_num = list(range(len(rows)))[2:-1]
+    col_lengths = []
+    for number in row_num:
+        col_lengths.append(len(rows[number]))
+    col_number = len(set(col_lengths))
+    return col_number
+    
+def check_col_length(directory, rows):
+    '''This function checks whether any of the first five rows has less than 13 columns.
+    The first two and last three rows are excluded, because they normally contain different lengths.'''
+    shorter11 = False
+    row_num = list(range(len(rows)))[2:-1]
+    for num in row_num:
+        if len(rows[num]) < 13:
+            shorter11 = True
+            return shorter11
+
+def submain(f, SCALE):
+    '''Subprocess of main function. Created separate function to avoid
+    redundancy.'''
     results = []
     directory, filename = os.path.split(f)
     table = cv2.imread(f, cv2.IMREAD_GRAYSCALE)
-    rows = extract_cell_images_from_table(table, 5)
+    rows = extract_cell_images_from_table(table, SCALE)
     cell_img_dir = os.path.join(directory, "cells")
     os.makedirs(cell_img_dir, exist_ok=True)
     paths = []
@@ -116,52 +139,26 @@ def main(f):
             path = os.path.join(cell_img_dir, cell_filename)
             cv2.imwrite(path, cell)
             paths.append(path)
+    return directory, rows
+
+def main(f):
+    SCALE = 5
+    directory, rows = submain(f, SCALE)
+    print(f'tried {directory} with {SCALE}.')
     
-    # The following lines check whether there are more than two unique max column numbers in the first
-    # eleven rows. If that is the case, probably some cells have been fused together horizontally.
-    # To remedy this, the scale value of extract_cell_images_from_table will be increased by 1.
-        
-    files = [filename for directory, filename in [os.path.split(x) for x in glob.glob('/home/hennes/Internship/pdfs/AC006-006/cells/*') if x.endswith('.png')]]
-    ten_filter = ('000','001', '002', '003', '004', '005', '006', '007', '008', '009', '010')
-    first_ten = []
-    for number in ten_filter:
-        first_ten.append(sorted([e.split('-')[1].split('.')[0] for e in files if e.startswith(number)]))
-# how many unique column numbers are in the first ten rows?
-# If there are more than 2, try again with scale = 6
-    if len(set([x[-1] for x in first_ten])) > 2:
-        results = []
-        directory, filename = os.path.split(f)
-        table = cv2.imread(f, cv2.IMREAD_GRAYSCALE)
-        rows = extract_cell_images_from_table(table, 6)
-        cell_img_dir = os.path.join(directory, "cells")
-        os.makedirs(cell_img_dir, exist_ok=True)
-        paths = []
-        for i, row in enumerate(rows):
-            for j, cell in enumerate(row):
-                cell_filename = "{:03d}-{:03d}.png".format(i, j)
-                path = os.path.join(cell_img_dir, cell_filename)
-                cv2.imwrite(path, cell)
-                paths.append(path)
+    # Perform checks for difference between column lengths and for minimum
+    # column length. If checks fail, increase scale by 1. Repeat until either
+    # SCALE = 10 or checks are passed.
+    while ((check_col(directory, rows) > 1) or (check_col_length(directory, rows) == True)) and SCALE < 10:
+        SCALE +=1
+        directory, rows = submain(f, SCALE)
+        print(f'tried {directory} with {SCALE}.')
                 
-    files = [filename for directory, filename in [os.path.split(x) for x in glob.glob('/home/hennes/Internship/pdfs/AC006-006/cells/*') if x.endswith('.png')]]
-    ten_filter = ('000','001', '002', '003', '004', '005', '006', '007', '008', '009', '010')
-    first_ten = []
-    for number in ten_filter:
-        first_ten.append(sorted([e.split('-')[1].split('.')[0] for e in files if e.startswith(number)]))
-# how many unique column numbers are in the first ten rows?
-# If there are more than 2, try again with scale = 6
-    if len(set([x[-1] for x in first_ten])) > 2:
-        results = []
-        directory, filename = os.path.split(f)
-        table = cv2.imread(f, cv2.IMREAD_GRAYSCALE)
-        rows = extract_cell_images_from_table(table, 7)
-        cell_img_dir = os.path.join(directory, "cells")
-        os.makedirs(cell_img_dir, exist_ok=True)
-        paths = []
-        for i, row in enumerate(rows):
-            for j, cell in enumerate(row):
-                cell_filename = "{:03d}-{:03d}.png".format(i, j)
-                path = os.path.join(cell_img_dir, cell_filename)
-                cv2.imwrite(path, cell)
-                paths.append(path)
-    return paths
+    # Perform checks again. If they still fail, print message.
+    if SCALE == 10:
+        col_number = check_col(directory, rows)
+        if col_number > 1:
+            print(f'There are still several column lengths in table {directory}. Manually check this')
+        short = check_col_length(directory, rows)
+        if short:
+            print(f'There are rows that are too short in table {directory}. Manually check this')
