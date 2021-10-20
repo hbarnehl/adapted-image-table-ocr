@@ -46,7 +46,7 @@ def find_tables(image):
     # A table should have a lot of intersections. We might have a rectangular image
     # here though which would only have 4 intersections, 1 at each corner.
     # Leaving that step as a future TODO if it is ever necessary.
-    images = [image[y:5+y+h, x-10:x+w+5] for x, y, w, h in bounding_rects]
+    images = [image[y:5+y+h, x-10:x+w+35] for x, y, w, h in bounding_rects]
     return images
 
 def main(files):

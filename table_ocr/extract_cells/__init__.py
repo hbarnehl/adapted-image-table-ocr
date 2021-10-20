@@ -148,14 +148,14 @@ def main(f):
     
     # Perform checks for difference between column lengths and for minimum
     # column length. If checks fail, increase scale by 1. Repeat until either
-    # SCALE = 10 or checks are passed.
-    while ((check_col(directory, rows) > 1) or (check_col_length(directory, rows) == True)) and SCALE < 10:
+    # SCALE = 11 or checks are passed.
+    while ((check_col(directory, rows) > 1) or (check_col_length(directory, rows) == True)) and SCALE < 11:
         SCALE +=1
         directory, rows = submain(f, SCALE)
         print(f'tried {directory} with {SCALE}.')
                 
     # Perform checks again. If they still fail, print message.
-    if SCALE == 10:
+    if SCALE == 11:
         col_number = check_col(directory, rows)
         if col_number > 1:
             print(f'There are still several column lengths in table {directory}. Manually check this')
