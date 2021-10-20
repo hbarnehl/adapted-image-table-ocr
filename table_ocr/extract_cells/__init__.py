@@ -1,7 +1,8 @@
 import cv2
 import os
+import glob
 
-def extract_cell_images_from_table(image):
+def extract_cell_images_from_table(image, SCALE):
 # First image is blurred to reduce noise
     BLUR_KERNEL_SIZE = (9, 9)
     STD_DEV_X_DIRECTION = 0
@@ -22,7 +23,6 @@ def extract_cell_images_from_table(image):
     )
 # Finding Vertical and Horizontal Lines
     vertical = horizontal = img_bin.copy()
-    SCALE = 5
     image_width, image_height = horizontal.shape
     horizontal_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (int(image_width / SCALE), 1))
     horizontally_opened = cv2.morphologyEx(img_bin, cv2.MORPH_OPEN, horizontal_kernel)
@@ -49,7 +49,7 @@ def extract_cell_images_from_table(image):
     bounding_rects = [cv2.boundingRect(a) for a in approx_polys]
     
     # Filter out rectangles that are too narrow or too short.
-    MIN_RECT_WIDTH = 20     
+    MIN_RECT_WIDTH = 15     
     MIN_RECT_HEIGHT = 10
     bounding_rects = [
         r for r in bounding_rects if MIN_RECT_WIDTH < r[2] and MIN_RECT_HEIGHT < r[3]
@@ -106,7 +106,7 @@ def main(f):
     results = []
     directory, filename = os.path.split(f)
     table = cv2.imread(f, cv2.IMREAD_GRAYSCALE)
-    rows = extract_cell_images_from_table(table)
+    rows = extract_cell_images_from_table(table, 5)
     cell_img_dir = os.path.join(directory, "cells")
     os.makedirs(cell_img_dir, exist_ok=True)
     paths = []
@@ -116,4 +116,52 @@ def main(f):
             path = os.path.join(cell_img_dir, cell_filename)
             cv2.imwrite(path, cell)
             paths.append(path)
+    
+    # The following lines check whether there are more than two unique max column numbers in the first
+    # eleven rows. If that is the case, probably some cells have been fused together horizontally.
+    # To remedy this, the scale value of extract_cell_images_from_table will be increased by 1.
+        
+    files = [filename for directory, filename in [os.path.split(x) for x in glob.glob('/home/hennes/Internship/pdfs/AC006-006/cells/*') if x.endswith('.png')]]
+    ten_filter = ('000','001', '002', '003', '004', '005', '006', '007', '008', '009', '010')
+    first_ten = []
+    for number in ten_filter:
+        first_ten.append(sorted([e.split('-')[1].split('.')[0] for e in files if e.startswith(number)]))
+# how many unique column numbers are in the first ten rows?
+# If there are more than 2, try again with scale = 6
+    if len(set([x[-1] for x in first_ten])) > 2:
+        results = []
+        directory, filename = os.path.split(f)
+        table = cv2.imread(f, cv2.IMREAD_GRAYSCALE)
+        rows = extract_cell_images_from_table(table, 6)
+        cell_img_dir = os.path.join(directory, "cells")
+        os.makedirs(cell_img_dir, exist_ok=True)
+        paths = []
+        for i, row in enumerate(rows):
+            for j, cell in enumerate(row):
+                cell_filename = "{:03d}-{:03d}.png".format(i, j)
+                path = os.path.join(cell_img_dir, cell_filename)
+                cv2.imwrite(path, cell)
+                paths.append(path)
+                
+    files = [filename for directory, filename in [os.path.split(x) for x in glob.glob('/home/hennes/Internship/pdfs/AC006-006/cells/*') if x.endswith('.png')]]
+    ten_filter = ('000','001', '002', '003', '004', '005', '006', '007', '008', '009', '010')
+    first_ten = []
+    for number in ten_filter:
+        first_ten.append(sorted([e.split('-')[1].split('.')[0] for e in files if e.startswith(number)]))
+# how many unique column numbers are in the first ten rows?
+# If there are more than 2, try again with scale = 6
+    if len(set([x[-1] for x in first_ten])) > 2:
+        results = []
+        directory, filename = os.path.split(f)
+        table = cv2.imread(f, cv2.IMREAD_GRAYSCALE)
+        rows = extract_cell_images_from_table(table, 7)
+        cell_img_dir = os.path.join(directory, "cells")
+        os.makedirs(cell_img_dir, exist_ok=True)
+        paths = []
+        for i, row in enumerate(rows):
+            for j, cell in enumerate(row):
+                cell_filename = "{:03d}-{:03d}.png".format(i, j)
+                path = os.path.join(cell_img_dir, cell_filename)
+                cv2.imwrite(path, cell)
+                paths.append(path)
     return paths
