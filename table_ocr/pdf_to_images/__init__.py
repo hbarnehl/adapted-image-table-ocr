@@ -91,7 +91,7 @@ def get_rotate(image_filepath, tess_params):
 def mogrify(image_filepath, rotate):
     subprocess.run(["mogrify", "-rotate", rotate, image_filepath])
     
-def correct_skew(filepath, delta=1, limit=5):
+def correct_skew(filepath, delta=0.2, limit=5):
 	'''This is code taken from https://stackoverflow.com/a/57965160 to auto
 	matically detect skew in the image of a table and apply the appropriate
 	rotation to straigthen it.'''
