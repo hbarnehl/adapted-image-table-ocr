@@ -40,7 +40,7 @@ def pdfimages(pdf_filepath):
 
     # pdfimages outputs results to the current working directory
     with working_dir(directory):
-        subprocess.run(["pdftoppm", filename, filename.split(".pdf")[0], "-png"])
+        subprocess.run(["pdfimages", "-png", filename, filename.split(".pdf")[0]])
 
     image_filenames = find_matching_files_in_dir(filename_sans_ext, directory)
     logger.debug(
@@ -67,11 +67,7 @@ def preprocess_img(filepath, tess_params=None):
     (--oem 0). Some versions of tesseract will segfault if you let it run OSD
     with the default oem (3).
     """
-    if tess_params is None:
-        tess_params = ["--psm", "0", "--oem", "0"]
-    rotate = get_rotate(filepath, tess_params)
-    logger.debug("Rotating {} by {}.".format(filepath, rotate))
-    mogrify(filepath, rotate)
+   
     correct_skew(filepath)
 
 def get_rotate(image_filepath, tess_params):
