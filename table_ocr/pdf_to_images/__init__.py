@@ -4,6 +4,7 @@ import subprocess
 from scipy.ndimage import interpolation as inter
 import numpy as np
 import cv2
+import glob
 
 from table_ocr.util import get_logger, working_dir
 
@@ -41,6 +42,13 @@ def pdfimages(pdf_filepath):
     # pdfimages outputs results to the current working directory
     with working_dir(directory):
         subprocess.run(["pdftoppm", filename, filename.split(".pdf")[0], "-png"])
+    
+    # add a 0 to if the table number is single digit
+
+    filelist =  [file for file in glob.glob(directory+'/*') if file.endswith(".png")]
+    [os.rename(x, f"{x.split('-')[0]}-0{x.split('-')[-1]}") for x in filelist if len(x.split('-')[-1].split('.')[0]) == 1]
+    
+    
 
     image_filenames = find_matching_files_in_dir(filename_sans_ext, directory)
     logger.debug(
