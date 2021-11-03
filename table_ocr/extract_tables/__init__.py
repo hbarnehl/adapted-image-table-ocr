@@ -48,11 +48,11 @@ def find_tables(image):
     # Leaving that step as a future TODO if it is ever necessary.
     images = [image[y:5+y+h, x-10:x+w+35] for x, y, w, h in bounding_rects]
     if images[0].size == 0:
-       images = [image[y:5+y+h, x-5:x+w+5] for x, y, w, h in bounding_rects]
+       images = [image[y:5+y+h, x-5:x+w+15] for x, y, w, h in bounding_rects]
     if images[0].size == 0:
         images = [image[y:5+y+h, x:x+w+5] for x, y, w, h in bounding_rects]
     if images[0].size == 0:
-        images = [image[y:5+y+h, x:x+w] for x, y, w, h in bounding_rects]
+        images = [image[y:y+h, x:x+w] for x, y, w, h in bounding_rects]
     if images[0].size == 0:
         print('Something went wrong with the table extraction.')
     return images
