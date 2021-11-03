@@ -144,7 +144,6 @@ def submain(f, SCALE):
 def main(f):
     SCALE = 5
     directory, rows = submain(f, SCALE)
-    print(f'tried {directory} with {SCALE}.')
     
     # Perform checks for difference between column lengths and for minimum
     # column length. If checks fail, increase scale by 1. Repeat until either
@@ -152,13 +151,13 @@ def main(f):
     while ((check_col(directory, rows) > 1) or (check_col_length(directory, rows) == True)) and SCALE < 11:
         SCALE +=1
         directory, rows = submain(f, SCALE)
-        print(f'tried {directory} with {SCALE}.')
+        if SCALE == 11:
+            print(f'tried {directory} with {SCALE}.')
                 
-    # Perform checks again. If they still fail, print message.
-    if SCALE == 11:
-        col_number = check_col(directory, rows)
-        if col_number > 1:
-            print(f'There are still several column lengths in table {directory}. Manually check this')
-        short = check_col_length(directory, rows)
-        if short:
-            print(f'There are rows that are too short in table {directory}. Manually check this')
+        # Perform checks again. If they still fail, print message.
+            col_number = check_col(directory, rows)
+            if col_number > 1:
+                print(f'There are still several column lengths in table {directory}. Manually check this')
+            short = check_col_length(directory, rows)
+            if short:
+                print(f'There are rows that are too short in table {directory}. Manually check this')
