@@ -56,7 +56,7 @@ def crop_to_text(image):
     cleaned = img_bin - both
 
     # Get rid of little noise.
-    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
+    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (1, 1))
     opened = cv2.morphologyEx(cleaned, cv2.MORPH_OPEN, kernel)
     opened = cv2.dilate(opened, kernel)
 
