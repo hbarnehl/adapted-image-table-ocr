@@ -21,6 +21,8 @@ def extract_cell_images_from_table(image, SCALE):
         BLOCK_SIZE,
         SUBTRACT_FROM_MEAN,
     )
+    kernel = np.ones((3,3),np.uint8)
+    img_bin = cv2.dilate(img_bin,kernel,iterations = 1)
 # Finding Vertical and Horizontal Lines
     vertical = horizontal = img_bin.copy()
     image_width, image_height = horizontal.shape
