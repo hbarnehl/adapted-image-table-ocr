@@ -1,7 +1,7 @@
 import os
 import cv2
 
-def find_tables(image):
+def find_tables(image, SCALE):
     BLUR_KERNEL_SIZE = (17, 17)
     STD_DEV_X_DIRECTION = 0
     STD_DEV_Y_DIRECTION = 0
@@ -19,7 +19,6 @@ def find_tables(image):
         SUBTRACT_FROM_MEAN,
     )
     vertical = horizontal = img_bin.copy()
-    SCALE = 20
     image_width, image_height = horizontal.shape
     horizontal_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (int(image_width / SCALE), 1))
     horizontally_opened = cv2.morphologyEx(img_bin, cv2.MORPH_OPEN, horizontal_kernel)
@@ -62,7 +61,9 @@ def main(files):
     for f in files:
         directory, filename = os.path.split(f)
         image = cv2.imread(f, cv2.IMREAD_GRAYSCALE)
-        tables = find_tables(image)
+        tables = find_tables(image, SCALE=8)
+        if tables[0].size == 0 or len(tables[0]) < 50:
+            tables = find_tables(image, SCALE=20)
         files = []
         filename_sans_extension = os.path.splitext(filename)[0]
         if tables:
