@@ -4,7 +4,7 @@ import glob
 
 def extract_cell_images_from_table(image, SCALE):
 # First image is blurred to reduce noise
-    BLUR_KERNEL_SIZE = (9, 9)
+    BLUR_KERNEL_SIZE = (5, 5)
     STD_DEV_X_DIRECTION = 0
     STD_DEV_Y_DIRECTION = 0
     blurred = cv2.GaussianBlur(image, BLUR_KERNEL_SIZE, STD_DEV_X_DIRECTION, STD_DEV_Y_DIRECTION)
