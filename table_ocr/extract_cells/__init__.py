@@ -1,6 +1,7 @@
 import cv2
 import os
 import glob
+import numpy as np
 
 def extract_cell_images_from_table(image, SCALE):
 # First image is blurred to reduce noise
