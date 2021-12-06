@@ -6,7 +6,7 @@ import cv2
 import numpy as np
 import pytesseract
 
-def main(tess_args, image_file):
+def main(tess_args, thresh, no_noise, image_file):
     """
     OCR the image and output the text to a file with an extension that is ready
     to be used in Tesseract training (.gt.txt).
@@ -18,7 +18,9 @@ def main(tess_args, image_file):
     directory, filename = os.path.split(image_file)
     filename_sans_ext, ext = os.path.splitext(filename)
     image = cv2.imread(image_file, cv2.IMREAD_GRAYSCALE)
-    cropped = crop_to_text(image)
+    if thresh==True:
+        T, image = cv2.threshold(image, 0, 255, cv2.THRESH_OTSU)
+    cropped = crop_to_text(image, no_noise)
     ocr_data_dir = os.path.join(directory, "ocr_data")
     os.makedirs(ocr_data_dir, exist_ok=True)
     out_imagepath = os.path.join(ocr_data_dir, filename)
@@ -33,7 +35,7 @@ def main(tess_args, image_file):
         txt_file.write(txt)
     return out_txtpath
 
-def crop_to_text(image):
+def crop_to_text(image, no_noise):
     MAX_COLOR_VAL = 255
     BLOCK_SIZE = 15
     SUBTRACT_FROM_MEAN = -2
@@ -55,12 +57,13 @@ def crop_to_text(image):
     both = horizontal_lines + vertical_lines
     cleaned = img_bin - both
 
-    # Get rid of little noise.
-    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (1, 1))
-    opened = cv2.morphologyEx(cleaned, cv2.MORPH_OPEN, kernel)
-    opened = cv2.dilate(opened, kernel)
+    if no_noise == None:
+        # Get rid of little noise.
+        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (1, 1))
+        cleaned = cv2.morphologyEx(cleaned, cv2.MORPH_OPEN, kernel)
+        cleaned = cv2.dilate(cleaned, kernel)
 
-    contours, hierarchy = cv2.findContours(opened, cv2.RETR_LIST, cv2.CHAIN_APPROX_SIMPLE)
+    contours, hierarchy = cv2.findContours(cleaned, cv2.RETR_LIST, cv2.CHAIN_APPROX_SIMPLE)
     bounding_rects = [cv2.boundingRect(c) for c in contours]
     NUM_PX_COMMA = 6
     MIN_CHAR_AREA = 5 * 9

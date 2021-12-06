@@ -47,13 +47,12 @@ def find_tables(image, SCALE):
     # Leaving that step as a future TODO if it is ever necessary.
     images = [image[y:5+y+h, x-10:x+w+10] for x, y, w, h in bounding_rects]
     if images[0].size == 0 or len(images[0]) < 50:
-       images = [image[y:5+y+h, x-5:x+w+5] for x, y, w, h in bounding_rects]
-    if images[0].size == 0 or len(images[0]) < 50:
-        images = [image[y:5+y+h, x:x+w+5] for x, y, w, h in bounding_rects]
-    if images[0].size == 0 or len(images[0]) < 50:
-        images = [image[y:y+h, x:x+w] for x, y, w, h in bounding_rects]
-    if images[0].size == 0 or len(images[0]) < 50:
-        print('Something went wrong with the table extraction.')
+        images = [image[y:5+y+h, x-5:x+w+5] for x, y, w, h in bounding_rects]
+        if images[0].size == 0 or len(images[0]) < 50:
+            images = [image[y:5+y+h, x:x+w+5] for x, y, w, h in bounding_rects]
+            if images[0].size == 0 or len(images[0]) < 50:
+                images = [image[y:y+h, x:x+w] for x, y, w, h in bounding_rects]
+
     return images
 
 def main(files):
@@ -64,6 +63,8 @@ def main(files):
         tables = find_tables(image, SCALE=8)
         if tables[0].size == 0 or len(tables[0]) < 50:
             tables = find_tables(image, SCALE=20)
+            if tables[0].size == 0 or len(tables[0]) < 50:
+                print(f'Extraction error: {files}.')
         files = []
         filename_sans_extension = os.path.splitext(filename)[0]
         if tables:

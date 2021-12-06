@@ -3,7 +3,7 @@ import os
 import glob
 import numpy as np
 
-def extract_cell_images_from_table(image, SCALE):
+def extract_cell_images_from_table(image, SCALE, dilate):
 # First image is blurred to reduce noise
     BLUR_KERNEL_SIZE = (5, 5)
     STD_DEV_X_DIRECTION = 0
@@ -22,9 +22,10 @@ def extract_cell_images_from_table(image, SCALE):
         BLOCK_SIZE,
         SUBTRACT_FROM_MEAN,
     )
-    kernel = np.ones((3,3),np.uint8)
-    img_bin = cv2.dilate(img_bin,kernel,iterations = 1)
-# Finding Vertical and Horizontal Lines
+    if dilate==True:
+        kernel = np.ones((3,3),np.uint8)
+        img_bin = cv2.dilate(img_bin,kernel,iterations = 1)
+    # Finding Vertical and Horizontal Lines
     vertical = horizontal = img_bin.copy()
     image_width, image_height = horizontal.shape
     horizontal_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (int(image_width / SCALE), 1))
@@ -126,13 +127,13 @@ def check_col_length(directory, rows):
             shorter11 = True
             return shorter11
 
-def submain(f, SCALE):
+def submain(f, SCALE, dilate):
     '''Subprocess of main function. Created separate function to avoid
     redundancy.'''
     results = []
     directory, filename = os.path.split(f)
     table = cv2.imread(f, cv2.IMREAD_GRAYSCALE)
-    rows = extract_cell_images_from_table(table, SCALE)
+    rows = extract_cell_images_from_table(table, SCALE, dilate)
     cell_img_dir = os.path.join(directory, "cells")
     os.makedirs(cell_img_dir, exist_ok=True)
     paths = []
@@ -144,13 +145,13 @@ def submain(f, SCALE):
             paths.append(path)
     return directory, rows
 
-def main(f):
+def main(dilate, f):
     SCALE = 5
-    directory, rows = submain(f, SCALE)
+    directory, rows = submain(f, SCALE, dilate)
     
     # Perform checks for difference between column lengths and for minimum
     # column length. If checks fail, increase scale by 1. Repeat until either
     # SCALE = 11 or checks are passed.
     while ((check_col(directory, rows) > 1) or (check_col_length(directory, rows) == True)) and SCALE < 11:
         SCALE +=1
-        directory, rows = submain(f, SCALE)
+        directory, rows = submain(f, SCALE, dilate)
