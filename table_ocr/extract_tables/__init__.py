@@ -66,6 +66,8 @@ def find_tables(image, AC, old, SCALE):
         except:
             txt = old
             None
+    elif AC == False:
+        txt = None
 
     # The link where a lot of this code was borrowed from recommends an
     # additional step to check the number of "joints" inside this bounding rectangle.
@@ -93,14 +95,16 @@ def main(AC, files):
         filename_sans_extension = os.path.splitext(filename)[0]
         image = cv2.imread(f, cv2.IMREAD_GRAYSCALE)
         tables, txt = find_tables(image, AC, old, SCALE=8)
-        if txt == None:
-            print(f'{filename_sans_extension}: no AC number found')
-        else:
-            print(f'{filename_sans_extension}: AC = {txt}')
-        old = txt
+        if AC:
+            if txt == None:
+                print(f'{filename_sans_extension}: no AC number found')
+            else:
+                print(f'{filename_sans_extension}: AC = {txt}')
+            old = txt
         if tables == None or tables[0].size == 0 or len(tables[0]) < 50:
             tables, txt = find_tables(image, AC, old, SCALE=20)
-            old = txt
+            if AC:
+                old = txt
             if tables == None or tables[0].size == 0 or len(tables[0]) < 50:
                 print(f'Extraction error: {f}.')
         files = []
@@ -112,8 +116,8 @@ def main(AC, files):
                 txt = '000'
             else:
                 txt = "{:03d}".format(int(txt))
-        PC = filename_sans_extension.split('-')[0]
-        filename_sans_extension = f'{PC}-AC{txt}-{filename_sans_extension.split("-")[-1]}'
+            PC = filename_sans_extension.split('-')[0]
+            filename_sans_extension = f'{PC}-AC{txt}-{filename_sans_extension.split("-")[-1]}'
         if tables:
             os.makedirs(os.path.join(directory, filename_sans_extension), exist_ok=True)
             for i, table in enumerate(tables):
