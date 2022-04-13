@@ -43,7 +43,7 @@ def move_files(folder, old):
      for e in glob.glob(folder+'*') if not e.endswith('.pdf')]
 
 def ocr_pipeline(pdf, thresh=None, no_noise=None, preprocess=True, dilate=True, image_conversion=True,
-                 AC = False, from_cell = False):
+                 AC = False, from_cell = False, small = False):
     '''Function which binds together the functions necessary to turn one pdf of several pages of tables
     into a csv file which will be stored under the same name in the specified folder.
     The options are:
@@ -73,7 +73,10 @@ def ocr_pipeline(pdf, thresh=None, no_noise=None, preprocess=True, dilate=True, 
                        
     from_cell        - "True" = workflow starts from cell extraction. Only works if input is folders from 
                        old folder.
-                       "False" = workflow starts from image conversion. Input are pdf files.'''
+                       "False" = workflow starts from image conversion. Input are pdf files.
+    
+    small            - When cells are small, numbers can get recognised as cell walls. Turn this option to 
+                       true when this is the case.'''
     
     stop = None
     
@@ -126,7 +129,7 @@ def ocr_pipeline(pdf, thresh=None, no_noise=None, preprocess=True, dilate=True, 
         return stop
         
     # Create partial function for cell extraction in which dilation is specified
-    p_extract_cells = functools.partial(extract_cells.main, dilate)
+    p_extract_cells = functools.partial(extract_cells.main, dilate, small)
 
     # Extract individual cell images
     with concurrent.futures.ProcessPoolExecutor(max_workers=4) as executor:

@@ -8,7 +8,7 @@ import os
 folder = '/home/hennes/Internship/constituencies/'
 save_folder = '/home/hennes/Internship/constituencies_edit/'
 old = '/home/hennes/Internship/old_files/'
-candidates = pd.read_excel('/home/hennes/Internship/Party_Data_2021.xlsx')
+candidates = pd.read_excel('/home/hennes/Internship/Party_Data_2019.xlsx')
 PC_AC = set(sorted([folder.split('-')[0]+'-'+ folder.split('-')[1] for folder in next(os.walk(old))[1]]))
 PC_AC_dict = {e.split('-')[1]: e.split('-')[0] for e in PC_AC}
 
@@ -112,11 +112,11 @@ def cleaning(constituency, candidate_df, year, A_serial = None, max_digits = 4, 
             df.reset_index(drop=True, inplace=True)
 
     # name column with highest median value 'total votes'    
-    df.rename(columns = {df.median().idxmax(axis=1):'total'}, inplace=True)
-
+    df.rename(columns = {df.median().idxmax(axis=0):'total'}, inplace=True)
+    
     # exclude 'total votes' and name the one with second highest median 'total_valid'
     columns = [col for col in df.columns if not col.startswith('total')]
-    df.rename(columns = {df[columns].median().idxmax(axis=1):'total_valid'}, inplace=True)
+    df.rename(columns = {df[columns].median().idxmax(axis=0):'total_valid'}, inplace=True)
     
     # sometimes total and total valid will be switched.
     # Check if column three places to left of total_valid is called total
@@ -362,10 +362,44 @@ def cleaning(constituency, candidate_df, year, A_serial = None, max_digits = 4, 
     
     return df
 
-def connect_party(df, ACs):
+def connect_party(df, AC):
     
     # get appropriate constituency number
-    con_n = PC_AC_dict[ACs[0].split('.')[0]].split('C')[-1].replace('0', '')
+    con_n = int(PC_AC_dict[AC.split('.')[0]].split('C')[-1])
+
+    # define df excluding NOTA, only current constituency
+    dat = candidates[(candidates['Party']!= 'NOTA') & (candidates['Constituency_No'] == int(con_n))]\
+    [['Constituency_No', 'Party', 'Votes', 'Constituency_Name']]
+
+    dat['Votes'] = pd.to_numeric(dat['Votes'], errors='coerce')
+    # create column with rank of party per constituency
+    dat['rank'] = dat["Votes"].rank(ascending=False, numeric_only = True)
+    # get number of candidates
+    n_candidates = len(dat)
+    # create dict with party value pair
+    rank_party = pd.Series(dat.Party.values,index=dat['rank']).to_dict()
+    
+    # create dictionary with key = column name, value = rank
+    serial = df.columns.get_indexer(['serial'])[0]
+    column_rank = df.iloc[:,serial+1:serial+(n_candidates+1)]\
+        .agg(func=np.sum)\
+        .rank(ascending=False)\
+        .to_dict()
+    
+    df['pc'] = con_n
+
+    # Renaming column according to rank
+    rename_dict={}
+    for col, rank in column_rank.items():
+        rename_dict.update({col:rank_party.get(rank)}) 
+    df.rename(columns=rename_dict, inplace=True)
+    
+    df.to_csv(f'{save_folder}AC{AC.split(".")[0].split("C")[-1]}.csv')
+
+def connect_party2(df):
+    
+    # get appropriate constituency number
+    con_n = df.loc[5, 'pc']
 
     # define df excluding NOTA, only current constituency
     dat = candidates[(candidates['Party']!= 'NOTA') & (candidates['Constituency_No'] == int(con_n))]\

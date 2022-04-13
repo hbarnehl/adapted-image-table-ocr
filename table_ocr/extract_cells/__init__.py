@@ -145,13 +145,16 @@ def submain(f, SCALE, dilate):
             paths.append(path)
     return directory, rows
 
-def main(dilate, f):
+def main(dilate, small, f):
     SCALE = 5
+    if small:
+        SCALE = 2
     directory, rows = submain(f, SCALE, dilate)
     
     # Perform checks for difference between column lengths and for minimum
     # column length. If checks fail, increase scale by 1. Repeat until either
     # SCALE = 11 or checks are passed.
-    while ((check_col(directory, rows) > 1) or (check_col_length(directory, rows) == True)) and SCALE < 11:
-        SCALE +=1
-        directory, rows = submain(f, SCALE, dilate)
+    if not small:
+        while ((check_col(directory, rows) > 1) or (check_col_length(directory, rows) == True)) and SCALE < 11:
+            SCALE +=1
+            directory, rows = submain(f, SCALE, dilate)

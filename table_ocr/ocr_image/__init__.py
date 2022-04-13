@@ -66,7 +66,7 @@ def crop_to_text(image, no_noise):
     contours, hierarchy = cv2.findContours(cleaned, cv2.RETR_LIST, cv2.CHAIN_APPROX_SIMPLE)
     bounding_rects = [cv2.boundingRect(c) for c in contours]
     NUM_PX_COMMA = 6
-    MIN_CHAR_AREA = 5 * 9
+    MIN_CHAR_AREA = 3 * 3
     char_sized_bounding_rects = [(x, y, w, h) for x, y, w, h in bounding_rects if w * h > MIN_CHAR_AREA]
     if char_sized_bounding_rects:
         minx, miny, maxx, maxy = math.inf, math.inf, 0, 0
